@@ -949,91 +949,6 @@ fn canonicalize_scopes_matches_claude_code_order() {
     );
 }
 
-// `live_login_is_foreign` gates the rotation→Keychain mirror (rotation
-// coherence, #1): the mirror must still fire when the live `.credentials.json`
-// is merely a stale regular-file copy of OUR OWN pre-rotation pair (Claude
-// Code's Keychain mirror, one step behind), and must NOT fire over a login
-// clauth doesn't own (a real CC re-login into some other account).
-#[cfg(target_os = "macos")]
-mod keychain_mirror_gate {
-    use crate::testutil::HomeSandbox;
-
-    fn creds(access: &str) -> crate::profile::ClaudeCredentials {
-        crate::profile::ClaudeCredentials {
-            claude_ai_oauth: Some(crate::profile::OAuthToken {
-                access_token: access.to_string(),
-                refresh_token: Some(format!("{access}-refresh")),
-                expires_at: None,
-                scopes: None,
-                subscription_type: None,
-                ..crate::profile::OAuthToken::default_extra()
-            }),
-        }
-    }
-
-    fn save_profile_with(name: &str, access: &str) {
-        let mut p = crate::profile::Profile::new(name.to_string(), None, None);
-        p.credentials = Some(creds(access));
-        crate::profile::save_profile(&p).expect("save profile");
-    }
-
-    fn write_live_file(access: &str) {
-        let live = crate::profile::claude_dir()
-            .unwrap()
-            .join(".credentials.json");
-        std::fs::create_dir_all(live.parent().unwrap()).unwrap();
-        std::fs::write(&live, serde_json::to_vec(&creds(access)).unwrap()).unwrap();
-    }
-
-    #[test]
-    fn missing_live_file_is_not_foreign() {
-        let _home = HomeSandbox::new();
-        save_profile_with("alpha", "new-token");
-        assert!(!super::live_login_is_foreign(
-            &crate::profile::ProfileName::from("alpha"),
-            "old-token"
-        ));
-    }
-
-    #[test]
-    fn live_file_matching_stored_pair_is_not_foreign() {
-        let _home = HomeSandbox::new();
-        save_profile_with("alpha", "new-token");
-        write_live_file("new-token");
-        assert!(!super::live_login_is_foreign(
-            &crate::profile::ProfileName::from("alpha"),
-            "old-token"
-        ));
-    }
-
-    #[test]
-    fn stale_mirror_of_own_pre_rotation_pair_is_not_foreign() {
-        // The case the gate exists FOR: CC's regular-file mirror still holds the
-        // pair this rotation just superseded. Diverged by classification, but it
-        // is our own chain one step behind — the Keychain mirror must proceed.
-        let _home = HomeSandbox::new();
-        save_profile_with("alpha", "new-token");
-        write_live_file("old-token");
-        assert!(!super::live_login_is_foreign(
-            &crate::profile::ProfileName::from("alpha"),
-            "old-token"
-        ));
-    }
-
-    #[test]
-    fn unrelated_live_login_is_foreign() {
-        // A real CC re-login into some other account: matches neither the new
-        // nor the pre-rotation pair — never overwrite it.
-        let _home = HomeSandbox::new();
-        save_profile_with("alpha", "new-token");
-        write_live_file("someone-elses-token");
-        assert!(super::live_login_is_foreign(
-            &crate::profile::ProfileName::from("alpha"),
-            "old-token"
-        ));
-    }
-}
-
 // ── try_adopt_live_rotation (rotation coherence, &crate::profile::ProfileName::from(the adopt-don't-race half)) ──
 //
 // The running claude and clauth hold ONE single-use refresh family; when CC
@@ -4970,6 +4885,7 @@ fn repro_104_restamp_follows_a_regular_file_live_slot() {
     // The re-stamp leg runs for the ACTIVE profile in production; the
     // follower's is-active belt reads the same fact.
     config.state.active_profile = Some(crate::profile::ProfileName::from(name));
+    crate::profile::save_app_state(&config.state).expect("persist active profile");
     crate::profile::save_profile(&config.profiles[0]).expect("save profile");
     crate::claude::stamp_rolling_token(
         &crate::profile::ProfileName::from(name),
@@ -5021,6 +4937,7 @@ fn repro_104_restamp_leaves_a_foreign_live_login_alone() {
     // The re-stamp leg runs for the ACTIVE profile in production; the
     // follower's is-active belt reads the same fact.
     config.state.active_profile = Some(crate::profile::ProfileName::from(name));
+    crate::profile::save_app_state(&config.state).expect("persist active profile");
     crate::profile::save_profile(&config.profiles[0]).expect("save profile");
     crate::claude::stamp_rolling_token(
         &crate::profile::ProfileName::from(name),
@@ -6113,6 +6030,7 @@ fn repro_104_restamp_heals_a_logged_out_shell_live_file() {
     let far_chain = crate::usage::now_ms() as i64 + 24 * 3_600_000;
     let mut config = rolling_config(name, Some("rt-old"), Some(far_chain));
     config.state.active_profile = Some(crate::profile::ProfileName::from(name));
+    crate::profile::save_app_state(&config.state).expect("persist active profile");
     crate::profile::save_profile(&config.profiles[0]).expect("save profile");
     crate::claude::stamp_rolling_token(
         &crate::profile::ProfileName::from(name),
@@ -6162,6 +6080,7 @@ fn repro_104_restamp_leaves_a_symlink_live_slot_alone() {
     let far_chain = crate::usage::now_ms() as i64 + 24 * 3_600_000;
     let mut config = rolling_config(name, Some("rt-old"), Some(far_chain));
     config.state.active_profile = Some(crate::profile::ProfileName::from(name));
+    crate::profile::save_app_state(&config.state).expect("persist active profile");
     crate::profile::save_profile(&config.profiles[0]).expect("save profile");
     crate::claude::stamp_rolling_token(
         &crate::profile::ProfileName::from(name),
@@ -6208,6 +6127,7 @@ fn repro_104_restamp_skips_an_unparseable_live_file() {
     let far_chain = crate::usage::now_ms() as i64 + 24 * 3_600_000;
     let mut config = rolling_config(name, Some("rt-old"), Some(far_chain));
     config.state.active_profile = Some(crate::profile::ProfileName::from(name));
+    crate::profile::save_app_state(&config.state).expect("persist active profile");
     crate::profile::save_profile(&config.profiles[0]).expect("save profile");
     crate::claude::stamp_rolling_token(
         &crate::profile::ProfileName::from(name),
@@ -8212,4 +8132,58 @@ fn the_gate_adoption_never_takes_a_spent_store_over_memory() {
     adopt_disk_rotation(&handle, &pn(name), &gate_guard(name)).expect("adopt");
 
     assert_eq!(memory_refresh(&handle, name).as_deref(), Some("rt-new"));
+}
+
+#[test]
+fn repro_sync_missed_follow_survives_two_rotations() {
+    let _home = HomeSandbox::new();
+    let name = "test-sync-missed-follow";
+    let mut config = rolling_config(name, Some("rt-old"), Some(past_expiry()));
+    config.state.active_profile = Some(crate::profile::ProfileName::from(name));
+    crate::profile::save_app_state(&config.state).expect("persist the active marker");
+    crate::profile::save_profile(&config.profiles[0]).expect("save profile");
+    let chain = config.profiles[0]
+        .credentials
+        .as_ref()
+        .and_then(|c| c.claude_ai_oauth.as_ref())
+        .expect("chain")
+        .clone();
+    crate::claude::stamp_rolling_token(&crate::profile::ProfileName::from(name), &chain)
+        .expect("stamp");
+    // The live slot is a regular file CC wrote, holding the pre-rotation bearer.
+    let claude_dir = crate::profile::claude_dir().expect("claude dir");
+    std::fs::create_dir_all(&claude_dir).expect("mkdir");
+    let live_path = claude_dir.join(".credentials.json");
+    let live = live_file_fixture(fed_bearer("at-old"));
+    std::fs::write(&live_path, serde_json::to_vec(&live).expect("ser")).expect("write live");
+    let handle = Arc::new(RankedMutex::new(config));
+    persist_rotation(
+        &handle,
+        &crate::profile::ProfileName::from(name),
+        TokenResponse {
+            access_token: "at-rotated".to_string(),
+            refresh_token: "rt-rotated".to_string(),
+            expires_in: 3600,
+            scope: None,
+        },
+    )
+    .expect("persist");
+    // Simulate a publication which did not land: the profile has B, but the
+    // destination still holds the A clauth installed. Another refresh must not
+    // erase the evidence that A belongs to this profile.
+    std::fs::write(&live_path, serde_json::to_vec(&live).expect("ser")).expect("restore A");
+    persist_rotation(
+        &handle,
+        &crate::profile::ProfileName::from(name),
+        TokenResponse {
+            access_token: "at-C".into(),
+            refresh_token: "rt-C".into(),
+            expires_in: 3600,
+            scope: None,
+        },
+    )
+    .expect("second rotation");
+    let raw: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&live_path).expect("read")).expect("parse");
+    assert_eq!(raw["claudeAiOauth"]["accessToken"], "at-C");
 }

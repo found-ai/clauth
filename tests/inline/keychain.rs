@@ -16,10 +16,10 @@ use super::{
     Keep, PutTransport, SECURITY_ARGV_VALUE_MAX, SECURITY_BIN, SECURITY_STDIN_LINE_MAX, SecurityOp,
     UnparseableItem, VerifyOutcome, WriteDisposition, account, add_generic_password_line,
     carried_raw, census_namespaced_items, classified_exit, delete_at, disposition_verdict,
-    dump_keychain, keychain_service_for_config_dir, login_blob_is_ours, merge_and_put_at,
-    merge_write, merged_blob, put_blob_at, put_transport, quarantine_path, quarantine_tail,
-    read_blob_at, run_with_deadline, salvage_delete_namespaced_item, security_deadline,
-    security_error, security_quote, sign_out_at, verify_outcome, write_disposition,
+    dump_keychain, keychain_service_for_config_dir, merge_and_put_at, merge_write, merged_blob,
+    put_blob_at, put_transport, quarantine_path, quarantine_tail, read_blob_at, run_with_deadline,
+    salvage_delete_namespaced_item, security_deadline, security_error, security_quote, sign_out_at,
+    verify_outcome, write_disposition,
 };
 use crate::logline::LogLines;
 use crate::profile::{ClaudeCredentials, OAuthToken};
@@ -130,6 +130,110 @@ fn keychain_round_trip_on_temp_service() {
             .is_none()
     );
     delete_at(&service, account).expect("second delete idempotent");
+}
+
+/// Real security(1) adapter, synthetic tokens and a unique service only. The
+/// normal suite drives the same reconciler with an injected failure backend.
+#[test]
+#[ignore = "touches a throwaway login Keychain service; run explicitly on macOS"]
+fn credential_sync_recovers_on_a_throwaway_service() {
+    use crate::credential_sync::{Backend, Destination, Observation};
+    let _home = HomeSandbox::new();
+    struct Item {
+        service: String,
+        user: String,
+    }
+    impl Drop for Item {
+        fn drop(&mut self) {
+            let _ = delete_at(&self.service, &self.user);
+        }
+    }
+    struct Adapter {
+        service: String,
+        fail_write: bool,
+    }
+    impl Backend for Adapter {
+        fn has_keychain(&self) -> bool {
+            true
+        }
+        fn read(&mut self, dest: Destination) -> anyhow::Result<Observation> {
+            match dest {
+                Destination::File => Ok(Observation::Missing),
+                Destination::Keychain => super::read_sync_login_at(&self.service),
+            }
+        }
+        fn write(
+            &mut self,
+            dest: Destination,
+            expected: &Observation,
+            incoming: &ClaudeCredentials,
+        ) -> anyhow::Result<()> {
+            assert_eq!(dest, Destination::Keychain);
+            anyhow::ensure!(!self.fail_write, "injected publication failure");
+            super::write_sync_login_at(&self.service, expected, incoming)
+        }
+    }
+    let item = Item {
+        service: format!(
+            "clauth-sync-test-{}-{}",
+            std::process::id(),
+            crate::usage::now_ms()
+        ),
+        user: super::account().unwrap(),
+    };
+    let mut a = sample_creds("synthetic-A", "unused");
+    a.claude_ai_oauth.as_mut().unwrap().refresh_token = None;
+    let mut initial = serde_json::to_value(&a).unwrap();
+    initial["mcpOAuth"] = serde_json::json!({"test-server": {"accessToken": "synthetic-mcp"}});
+    put_blob_at(&item.service, &item.user, &initial).unwrap();
+    let name = crate::profile::ProfileName::from("sync-keychain-test");
+    let mut profile = crate::profile::Profile::new(name.to_string(), None, None);
+    profile.credentials = Some(a.clone());
+    crate::profile::save_profile(&profile).unwrap();
+    let state = crate::profile::AppState {
+        active_profile: Some(name.clone()),
+        profiles: vec![name.clone()],
+        ..Default::default()
+    };
+    crate::profile::save_app_state(&state).unwrap();
+    crate::credential_sync::begin_install(&name).unwrap();
+    let mut adapter = Adapter {
+        service: item.service.clone(),
+        fail_write: true,
+    };
+    for token in ["synthetic-B", "synthetic-C"] {
+        crate::credential_sync::remember_current(&name).unwrap();
+        a.claude_ai_oauth.as_mut().unwrap().access_token = token.into();
+        crate::lock::with_state_lock(|held| {
+            crate::profile::write_profile_credentials(&name, Some(&a), held)
+        })
+        .unwrap();
+        crate::credential_sync::reconcile_with(&name, crate::usage::now_ms(), true, &mut adapter)
+            .unwrap();
+    }
+    assert_eq!(
+        read_login(&item.service, &item.user).unwrap().access_token,
+        "synthetic-A"
+    );
+    adapter.fail_write = false;
+    crate::credential_sync::reconcile_with(&name, crate::usage::now_ms(), true, &mut adapter)
+        .unwrap();
+    let after = read_blob_at(&item.service, &item.user).unwrap().unwrap();
+    assert_eq!(after["claudeAiOauth"]["accessToken"], "synthetic-C");
+    assert!(after["claudeAiOauth"].get("refreshToken").is_none());
+    assert_eq!(after["mcpOAuth"], initial["mcpOAuth"]);
+    assert_eq!(
+        crate::credential_sync::status().unwrap().keychain,
+        crate::credential_sync::SyncState::Current
+    );
+    let foreign = sample_creds("synthetic-foreign", "foreign-refresh");
+    put_login(&item.service, &item.user, &foreign, Keep::Everything);
+    crate::credential_sync::reconcile_with(&name, crate::usage::now_ms(), true, &mut adapter)
+        .unwrap();
+    assert_eq!(
+        read_login(&item.service, &item.user).unwrap().access_token,
+        "synthetic-foreign"
+    );
 }
 
 /// The read-modify-write, end to end against a real Keychain item: the sibling
@@ -280,42 +384,6 @@ fn merged_blob_under_a_rotation_keeps_the_accounts_own_blocks() {
     assert_eq!(merged["claudeAiOauth"]["accessToken"], "rotated");
     assert_eq!(merged["organizationUuid"], "org-outgoing");
     assert_eq!(merged["mcpOAuth"]["linear"]["accessToken"], "mock-linear");
-}
-
-// The CLA-SPLIT foreign gate's recognition rule (the pure core of
-// `item_login_state`): `Keep::Everything` preserves the item's sibling
-// blocks, so the item's login must be one clauth put there BEFORE a split
-// mirror runs. A rolling bearer changes on every stamp, so "ours" is decided
-// by recognition against the bearers the caller wrote or is replacing — never
-// against the incoming login alone, which a re-stamp replaces by design.
-
-#[test]
-fn login_blob_is_ours_accepts_an_absent_item_and_a_blank_shell() {
-    assert!(login_blob_is_ours(None, &["previous"]));
-    let shell = serde_json::json!({ "claudeAiOauth": { "accessToken": "" } });
-    assert!(login_blob_is_ours(Some(&shell), &["previous"]));
-    let no_login = serde_json::json!({ "mcpOAuth": {} });
-    assert!(login_blob_is_ours(Some(&no_login), &["previous"]));
-}
-
-#[test]
-fn login_blob_is_ours_recognizes_the_bearer_being_replaced() {
-    assert!(login_blob_is_ours(
-        Some(&item("previous")),
-        &["previous", "incoming"]
-    ));
-}
-
-#[test]
-fn login_blob_is_ours_refuses_a_login_clauth_never_wrote() {
-    assert!(
-        !login_blob_is_ours(Some(&item("someone-elses")), &["previous", "incoming"]),
-        "an out-of-band `/login` as another account must never have its blocks preserved \
-         under this account's bearer"
-    );
-    // No candidates at all (the arming rotation over a fresh profile): any
-    // non-empty login in the item is foreign by recognition.
-    assert!(!login_blob_is_ours(Some(&item("whatever")), &[]));
 }
 
 #[test]

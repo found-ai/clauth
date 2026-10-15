@@ -105,7 +105,7 @@ const SECURITY_BIN: &str = "/usr/bin/security";
 /// share it; the rotation mirror, which `oauth.rs` runs after its lock closure
 /// ends, spends the `runtime::KEYCHAIN_MIRROR_BUDGET` its landing arms past the
 /// hold, so the landing's four calls (the foreign gate's item read,
-/// [`item_login_state`], then the mirror's three) share 20 s there too.
+/// the synchronization read, then the mirror's three) share 20 s there too.
 ///
 /// This is the PER-CALL ceiling only. What a waiting peer actually feels is the
 /// whole flock hold, and a hold can run more than one mirror
@@ -125,7 +125,7 @@ const SECURITY_TIMEOUT: Duration = Duration::from_secs(10);
 
 // `runtime::KEYCHAIN_MIRROR_BUDGET` still equals the READ+WRITE pair — the two
 // invocations a mirror was when it was derived. A landing now makes up to four
-// under it: the foreign gate's item read (`item_login_state`) before the pair,
+// under it: the synchronization ownership read before the pair,
 // and the read-back verification (`verify_write`) after it. A landing arms the
 // budget past its hold, so each later call gets what the earlier ones left. It
 // is spelled
@@ -755,6 +755,7 @@ fn security_quote(s: &str) -> Result<String> {
 ///
 /// Whether a write happens at all is [`merge_write`]'s call, which is where the
 /// skip and its reasons live.
+#[cfg(test)]
 fn merge_and_put_at(service: &str, account: &str, incoming: &Value, keep: Keep) -> Result<()> {
     merge_and_put_reporting_at(service, account, incoming, keep, |_| {})
 }
@@ -1448,92 +1449,59 @@ fn install_at(service: &str, store: &Value, on_replaced: impl FnOnce(&Value)) ->
     merge_and_put_reporting_at(service, &account()?, store, Keep::CarriedOnly, on_replaced)
 }
 
-/// Mirror `creds` after clauth rotated THIS account's own chain (`oauth.rs`).
-/// Same account by construction, so every block the item holds survives beside
-/// the fresh login ([`Keep::Everything`]): the Keychain twin of the store
-/// rewrite `profile::serialize_credentials_preserving_extra` performs on the
-/// same rotation.
-pub(crate) fn keychain_mirror_rotation(creds: &ClaudeCredentials) -> Result<()> {
-    let login = serde_json::to_value(creds).context("failed to serialize Claude credentials")?;
-    merge_and_put_at(SERVICE, &account()?, &login, Keep::Everything)
+pub(crate) fn read_sync_login() -> Result<crate::credential_sync::Observation> {
+    read_sync_login_at(SERVICE)
 }
 
-/// What a read of the real `Claude Code-credentials` item's login tells the
-/// rotation-mirror gate ([`item_login_state`]). Every caller of
-/// [`keychain_mirror_rotation`] — the vanilla rotation mirror, the rotation
-/// hook mirroring the freshly stamped sidecar, and the rolling re-stamp leg —
-/// writes `Keep::Everything` — every sibling block in the item survives — so
-/// they must establish the item's login is clauth's own FIRST: once CC
-/// migrates into the Keychain and deletes the plaintext file, the file layer
-/// stops being evidence, and an out-of-band `/login` as another account
-/// leaves the item holding B while clauth still believes A is active — the
-/// next mirror would preserve B's
-/// `organizationUuid`/`trustedDeviceToken`/`enterpriseGateway` beside A's
-/// bearer, a mixed identity that never self-corrects.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum ItemLoginState {
-    /// The item's login is one clauth put there, or the item is absent, or it
-    /// holds a blank (logged-out) shell. Proceed with the mirror.
-    Ours,
-    /// The item holds a non-empty login matching no bearer clauth knows it
-    /// wrote or replaced. Skip: leave the item intact rather than layer this
-    /// account's bearer under its blocks.
-    NotOurs,
-    /// The item answered with bytes that are not valid JSON — almost always a
-    /// TRUNCATED version of clauth's own write (#66/#76). PROCEED: the
-    /// mirror's own read leg quarantines the bytes and the write heals the
-    /// item, exactly the behavior this gate must not lose.
-    Corrupt,
-    /// The item could not be read at all (a locked keychain, a spent budget,
-    /// a headless refusal). Skip: a skipped mirror only delays the new bearer,
-    /// while preserving blocks nobody could read has no upside. Carries the
-    /// rendered cause for the event line.
-    Unreadable(String),
-}
-
-/// Read the real item and classify its login for the rotation-mirror gate
-/// ([`ItemLoginState`]). "Ours" for a bearer that changes on every re-stamp
-/// is decided by RECOGNITION: the caller passes the bearers it knows clauth
-/// wrote or is replacing (the sidecar's pre-stamp bearer, the pre-rotation
-/// chain token, the bearer about to be written), and the item's login must
-/// match one of them.
-///
-/// This is a `security` SUBPROCESS: callers keep it out of any state-flock
-/// hold (`oauth.rs` runs it after the lock closure ends, beside the write it
-/// gates).
-pub(crate) fn item_login_state(ours: &[&str]) -> ItemLoginState {
-    let account = match account() {
-        Ok(a) => a,
-        Err(e) => return ItemLoginState::Unreadable(format!("{e:#}")),
-    };
-    match read_blob_at(SERVICE, &account) {
-        Ok(blob) => {
-            if login_blob_is_ours(blob.as_ref(), ours) {
-                ItemLoginState::Ours
-            } else {
-                ItemLoginState::NotOurs
-            }
-        }
-        Err(e) if carried_raw(&e).is_some() => ItemLoginState::Corrupt,
-        Err(e) => ItemLoginState::Unreadable(format!("{e:#}")),
+fn read_sync_login_at(service: &str) -> Result<crate::credential_sync::Observation> {
+    match read_blob_at(service, &account()?) {
+        Ok(blob) => Ok(crate::credential_sync::Observation::from_blob(
+            blob.as_ref(),
+        )),
+        Err(e) if carried_raw(&e).is_some() => Ok(crate::credential_sync::Observation::Corrupt),
+        Err(_) => anyhow::bail!("Keychain login cannot be read"),
     }
 }
 
-/// The pure core of [`item_login_state`]: the recognition rule over an
-/// already-read item blob, so the truth table is pinned without a Keychain
-/// (the `put_transport` pattern). Blank means logged-out, the same line
-/// [`merged_blob`]'s `live_token` draws: two logged-out shells are equal to
-/// each other, so an empty token is never a match and never foreign.
-fn login_blob_is_ours(blob: Option<&Value>, ours: &[&str]) -> bool {
-    let Some(token) = blob
-        .and_then(|b| b.get("claudeAiOauth"))
-        .and_then(|l| l.get("accessToken"))
-        .and_then(Value::as_str)
-        .filter(|t| !t.is_empty())
-    else {
-        return true;
+pub(crate) fn write_sync_login(
+    expected: &crate::credential_sync::Observation,
+    creds: &ClaudeCredentials,
+) -> Result<()> {
+    write_sync_login_at(SERVICE, expected, creds)
+}
+
+fn write_sync_login_at(
+    service: &str,
+    expected: &crate::credential_sync::Observation,
+    creds: &ClaudeCredentials,
+) -> Result<()> {
+    use crate::credential_sync::Observation;
+    let account = account()?;
+    // Check ownership on the read used for the preserving merge. Unlike an
+    // explicit switch, a repair never treats an unreadable item as empty.
+    let existing = match read_blob_at(service, &account) {
+        Ok(blob) => {
+            anyhow::ensure!(
+                &Observation::from_blob(blob.as_ref()) == expected,
+                "Keychain login changed during synchronization"
+            );
+            blob
+        }
+        Err(e) if carried_raw(&e).is_some() && expected == &Observation::Corrupt => {
+            // Preserve exactly the malformed bytes this read observed; a
+            // second permissive read could pick up an unrelated fresh login.
+            if let Some(raw) = carried_raw(&e) {
+                quarantine_item_bytes(service, raw)?;
+            }
+            None
+        }
+        Err(_) => anyhow::bail!("Keychain login cannot be read for synchronization"),
     };
-    ours.contains(&token)
+    let login = serde_json::to_value(creds)?;
+    if let Some(blob) = merge_write(&login, existing.as_ref(), Keep::Everything) {
+        put_blob_at(service, &account, &blob)?;
+    }
+    Ok(())
 }
 
 /// Sign Claude Code out of the real `Claude Code-credentials` item:

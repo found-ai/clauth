@@ -424,7 +424,7 @@ pub(crate) fn switch_profile_cli(config: AppConfig, canonical: &ProfileName) -> 
                 .to_string()
         };
         out!(
-            "clauth: '{active}' has a newer login in ~/.claude. save it into '{active}' \
+            "clauth: '{active}' has an unrecognized login in ~/.claude. save it into '{active}' \
              and switch to '{canonical}'? [Y/n] "
         );
         let mut answer = String::new();
@@ -439,6 +439,8 @@ pub(crate) fn switch_profile_cli(config: AppConfig, canonical: &ProfileName) -> 
     } else {
         switch_profile(&config, canonical)?;
     }
+
+    crate::credential_sync::reconcile(canonical, true)?;
 
     // Prime the 5h window if opted in. Kicks with the current access token and
     // rotates once on a 401/429. One-shot — the CLI has no scheduler tick to
@@ -1119,6 +1121,7 @@ pub(crate) fn rename_profile(
                 .with_context(|| format!("failed to rename profile directory to '{new}'"))?;
         }
 
+        crate::credential_sync::forget(old)?;
         let was_active = config.is_active(old);
         config.rename_all_occurrences(old, new, held);
 
@@ -1201,6 +1204,7 @@ pub(crate) fn delete_profile(
         if token.is_some() {
             crate::gateway_tokens::revoke_profile_token(name.as_str(), held)?;
         }
+        crate::credential_sync::forget(name)?;
         config.remove(name, held);
         save_app_state(&config.state)?;
         Ok(())

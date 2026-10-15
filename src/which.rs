@@ -38,6 +38,8 @@ use crate::profile_json::tier_label;
 /// Which resolution branch attributed the loaded credentials to a profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Source {
+    /// Owned by this global profile, but the file contains an older installed token.
+    ManagedPredecessor,
     /// Exact `refreshToken` match against a stored profile.
     RefreshMatch,
     /// Exact `accessToken` match against a profile's long-lived session-token
@@ -56,6 +58,7 @@ pub(crate) enum Source {
 impl Source {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Source::ManagedPredecessor => "managed_predecessor",
             Source::RefreshMatch => "refresh_match",
             Source::SessionTokenMatch => "session_token_match",
             Source::SessionDir => "session_dir",
@@ -263,7 +266,7 @@ fn resolve_at(config: &AppConfig, config_dir: Option<&Path>) -> Option<(String, 
     let keychain_login = || keychain_evidence(config_dir);
     #[cfg(not(target_os = "macos"))]
     let keychain_login = || None;
-    resolve_profile(
+    let resolved = resolve_profile(
         config,
         creds.as_ref(),
         config_dir.is_some(),
@@ -271,7 +274,16 @@ fn resolve_at(config: &AppConfig, config_dir: Option<&Path>) -> Option<(String, 
         &crate::claude::installed_session_token,
         &keychain_login,
     )
-    .map(|(name, source)| (name.to_string(), source))
+    .map(|(name, source)| (name.to_string(), source));
+    resolved.or_else(|| {
+        if config_dir.is_some() {
+            return None;
+        }
+        let token = creds.as_ref()?.access_token()?;
+        let name = crate::credential_sync::file_owner(token)?;
+        config.find(&name)?;
+        Some((name.to_string(), Source::ManagedPredecessor))
+    })
 }
 
 /// How this session reads its credentials, used to explain what `switch` does to
@@ -567,14 +579,20 @@ fn emit_json(config: &AppConfig, resolved: Option<(String, Source)>) {
 fn json_view(config: &AppConfig, resolved: Option<&(String, Source)>) -> serde_json::Value {
     let profile = resolved
         .and_then(|(name, _)| config.find(&crate::profile::ProfileName::from(name.clone())));
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "profile": profile.map(|p| &p.name),
         "source": resolved.map(|(_, s)| s.as_str()),
         "base_url": profile.and_then(|p| p.base_url.as_ref()),
         "tier": profile.and_then(tier_label),
         "oauth": profile.map(Profile::is_oauth),
         "active": profile.is_some_and(|p| config.is_active(&p.name)),
-    })
+    });
+    if profile.is_some()
+        && let Some(status) = crate::credential_sync::status()
+    {
+        value["credential_sync"] = serde_json::json!(status);
+    }
+    value
 }
 
 // ---- Keychain evidence (macOS): the tier's read, behind a ~30 s TTL cache ----
