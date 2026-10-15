@@ -114,6 +114,13 @@ cargo test --locked keychain::tests::credential_sync_recovers_on_a_throwaway_ser
 The existing ordinary test configuration still disables the real Keychain
 adapter. The throwaway test supplies its own adapter to the same reconciler.
 
+Local validation on macOS with Rust 1.99.1:
+
+- The final debug suite passed all 6,085 tests (13 explicitly ignored fixtures).
+- Debug and release clippy passed for all targets/features with warnings denied.
+- The real throwaway-Keychain recovery and foreign-login preservation test passed.
+- Release test results and the platform CI checks are recorded on the fork PR.
+
 ## Installation and rollback
 
 Build and review the fork before replacing the installed binary. Retain the

@@ -8,7 +8,7 @@
 //! before a write and verification detects observable external interference.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -535,7 +535,7 @@ pub(crate) fn reconcile_with(
             continue;
         }
         let observed = crate::lock::with_keychain_budget(
-            Duration::from_secs(20).saturating_sub(started.elapsed()),
+            crate::runtime::KEYCHAIN_MIRROR_BUDGET.saturating_sub(started.elapsed()),
             || backend.read(dest),
         );
         match observed {
@@ -580,7 +580,7 @@ pub(crate) fn reconcile_with(
                     target.attempted = Some(desired.clone());
                     save_if_current(&journal)?;
                     let written = crate::lock::with_keychain_budget(
-                        Duration::from_secs(20).saturating_sub(started.elapsed()),
+                        crate::runtime::KEYCHAIN_MIRROR_BUDGET.saturating_sub(started.elapsed()),
                         || {
                             backend.write(dest, &observation, &incoming)?;
                             backend.read(dest)
