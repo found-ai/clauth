@@ -40,6 +40,11 @@ logo blinked between two header comparisons. The layout test now pins its
 existing test-only animation clock. The released production binary is unchanged.
 The local parallel suite also exposed a color assertion without the shared
 palette guard; that assertion now holds the existing `TierSandbox` guard.
+The [follow-up CI run](https://github.com/found-ai/clauth/actions/runs/38928411623)
+passed every check on Linux, macOS, and Windows, including release and debug
+tests, strict Clippy, formatting, dependency checks, and binary builds. Linux
+coverage remained 90.7%. Both test fixes and this validation record were merged
+in [PR #3](https://github.com/found-ai/clauth/pull/3).
 
 ## Next Mac acceptance
 
@@ -50,7 +55,10 @@ Keep the latest credentials when upgrading or rolling back.
    release binary, and verify `clauth --version` is `0.17.0-found.2`. Check the
    executable path used by the daemon as well as the interactive shell.
 2. Verify `clauth which --json` identifies the intended account. Check its
-   `credential_sync` destinations are current. With multiple Claude profiles,
+   applicable `credential_sync` destinations are current. To inspect global
+   Claude from a managed session, run
+   `env -u CODEX_HOME -u CLAUDE_CONFIG_DIR clauth which --json`; otherwise `which`
+   may identify the managed session instead. With multiple Claude profiles,
    switch to another saved account and back; confirm no unexpected capture or
    overwrite prompt appears. Account switching applies globally to Claude, so
    schedule this around active sessions.
