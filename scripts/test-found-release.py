@@ -18,10 +18,10 @@ SPEC.loader.exec_module(VALIDATOR)
 
 class ReleaseTests(unittest.TestCase):
     def test_current_tag_matches_binary_and_plugin(self):
-        VALIDATOR.validate("v0.17.0-found.1", ROOT)
+        VALIDATOR.validate("v0.17.0-found.2", ROOT)
 
     def test_wrong_tags_are_refused(self):
-        for tag in ["v0.17.0", "v0.17.0-found.2", "v0.17.0-found.0", "v0.17.0-rc1", "0.17.0-found.1", "vgarbage"]:
+        for tag in ["v0.17.0", "v0.17.0-found.1", "v0.17.0-found.3", "v0.17.0-found.0", "v0.17.0-rc1", "0.17.0-found.1", "vgarbage"]:
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 VALIDATOR.validate(tag, ROOT)
 
@@ -87,7 +87,7 @@ esac
             }
             result = subprocess.run(["bash", str(ROOT / "install.sh"), *args], env=env, capture_output=True, text=True)
             urls = (root / "urls").read_text().splitlines()
-            base = "https://github.com/found-ai/clauth/releases/download/v0.17.0-found.1/"
+            base = "https://github.com/found-ai/clauth/releases/download/v0.17.0-found.2/"
             self.assertEqual(urls, [base + "clauth-macos-aarch64", base + "sha256sums.txt"])
             if mode == "ok":
                 self.assertEqual(result.returncode, 0, result.stderr)

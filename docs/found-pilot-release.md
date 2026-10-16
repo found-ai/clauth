@@ -1,4 +1,4 @@
-# Found clauth pilot: v0.17.0-found.1
+# Found clauth pilot: v0.17.0-found.2
 
 Found's pilot fork of [uwuclxdy/clauth](https://github.com/uwuclxdy/clauth),
 based on upstream `9726ec3b7477e8abfd6df7f9d7953e0ac8ae92bc`.
@@ -7,7 +7,7 @@ This release repairs credential publication after failed token rotations and
 restarts, recognizes previously managed stale credentials, and protects
 unfamiliar logins from automatic replacement. Synchronization status is exposed
 through the existing status/which JSON output. See
-[the recovery design](https://github.com/found-ai/clauth/blob/v0.17.0-found.1/docs/credential-sync-recovery.md) for migration and concurrency
+[the recovery design](https://github.com/found-ai/clauth/blob/v0.17.0-found.2/docs/credential-sync-recovery.md) for migration and concurrency
 limitations.
 
 ## Pilot installation
@@ -18,8 +18,10 @@ restart. Automated tests include injected publication failures and a real
 throwaway macOS Keychain test; those do not replace observation of real sessions.
 
 Download the binary matching your platform and `sha256sums.txt` from
-[this exact Found release](https://github.com/found-ai/clauth/releases/tag/v0.17.0-found.1).
+[this exact Found release](https://github.com/found-ai/clauth/releases/tag/v0.17.0-found.2).
 Verify the binary's SHA-256 against the corresponding entry before installation.
+On macOS/Linux, make the downloaded binary executable with `chmod +x` before
+installing it.
 Release assets also have GitHub build-provenance attestations. Pilot checksum
 files are unsigned unless a Found release-signing secret is configured.
 
@@ -34,12 +36,12 @@ is installed. It refuses a missing or mismatched checksum. Source installation
 must also name the fork and tag explicitly:
 
 ```sh
-cargo install --git https://github.com/found-ai/clauth --tag v0.17.0-found.1 --locked clauth
+cargo install --git https://github.com/found-ai/clauth --tag v0.17.0-found.2 --locked clauth
 ```
 
 Before replacing an existing installation, retain its binary and stop every
 clauth daemon/TUI. Restart all clauth processes from the pilot binary, and
-verify `clauth --version` reports `0.17.0-found.1`. Claude sessions are external
+verify `clauth --version` reports `0.17.0-found.2`. Claude sessions are external
 credential writers and do not participate in clauth's installation lock.
 
 Background self-updates and remote automatic reinstalls are disabled in the
