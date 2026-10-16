@@ -122,6 +122,23 @@ fn find_expected_sha_empty_sums_file() {
     assert!(find_expected_sha("", "clauth-linux-x86_64").is_none());
 }
 
+#[test]
+fn found_pilot_never_starts_a_background_update() {
+    for value in [None, Some("0"), Some("1"), Some("true")] {
+        with_no_update_env(value, || {
+            for saved in [false, true] {
+                assert!(!updates_enabled(saved));
+                let (tx, rx) = std::sync::mpsc::channel();
+                assert!(spawn(tx, saved).is_none());
+                assert!(matches!(
+                    rx.try_recv(),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected)
+                ));
+            }
+        });
+    }
+}
+
 // ── updates_enabled (env opt-out) + spawn suppression ──────────────────────
 
 /// Set/restore `CLAUTH_NO_UPDATE` around a closure.
@@ -157,7 +174,7 @@ fn with_no_update_env<F: FnOnce()>(val: Option<&str>, f: F) {
 fn updates_enabled_when_env_unset() {
     with_no_update_env(None, || {
         assert!(
-            updates_enabled(true),
+            update_preferences_allow(true),
             "saved on, unset env → updates enabled"
         );
     });
@@ -167,7 +184,7 @@ fn updates_enabled_when_env_unset() {
 fn updates_disabled_when_env_is_one() {
     with_no_update_env(Some("1"), || {
         assert!(
-            !updates_enabled(true),
+            !update_preferences_allow(true),
             "CLAUTH_NO_UPDATE=1 → updates disabled"
         );
     });
@@ -177,7 +194,7 @@ fn updates_disabled_when_env_is_one() {
 fn updates_enabled_when_env_is_zero() {
     with_no_update_env(Some("0"), || {
         assert!(
-            updates_enabled(true),
+            update_preferences_allow(true),
             "CLAUTH_NO_UPDATE=0 → updates still enabled"
         );
     });
@@ -187,7 +204,7 @@ fn updates_enabled_when_env_is_zero() {
 fn updates_enabled_when_env_is_other_value() {
     with_no_update_env(Some("true"), || {
         assert!(
-            updates_enabled(true),
+            update_preferences_allow(true),
             "CLAUTH_NO_UPDATE=true (not '1') → still enabled"
         );
     });
@@ -216,17 +233,29 @@ fn spawn_sends_nothing_when_update_disabled() {
 #[test]
 fn updates_enabled_follows_the_saved_toggle() {
     with_no_update_env(None, || {
-        assert!(updates_enabled(true), "saved on + env unset → enabled");
-        assert!(!updates_enabled(false), "saved off + env unset → disabled");
+        assert!(
+            update_preferences_allow(true),
+            "saved on + env unset → enabled"
+        );
+        assert!(
+            !update_preferences_allow(false),
+            "saved off + env unset → disabled"
+        );
     });
     with_no_update_env(Some("1"), || {
-        assert!(!updates_enabled(true), "env 1 wins over saved on");
-        assert!(!updates_enabled(false), "saved off + env 1 → disabled");
+        assert!(!update_preferences_allow(true), "env 1 wins over saved on");
+        assert!(
+            !update_preferences_allow(false),
+            "saved off + env 1 → disabled"
+        );
     });
     with_no_update_env(Some("0"), || {
-        assert!(updates_enabled(true), "env 0 leaves saved on enabled");
         assert!(
-            !updates_enabled(false),
+            update_preferences_allow(true),
+            "env 0 leaves saved on enabled"
+        );
+        assert!(
+            !update_preferences_allow(false),
             "env 0 cannot re-enable a saved off"
         );
     });

@@ -16,28 +16,18 @@ env:
   CARGO_NET_RETRY: "10"
   CARGO_HTTP_MULTIPLEXING: "false"
 
-# The release itself is created by the maintainer's release script right after
-# the tag push, with the full changelog already in the body so the notes ride
-# along in GitHub's release email. This workflow never creates the release or
-# touches its notes -- it only builds the per-OS binaries and uploads them (plus
-# sums + signature) to the release the script already published. One upload
-# point (the publish job), so no concurrent softprops find-or-create can
-# duplicate the release and orphan the notes.
+# Validate the tag against the binary and plugin, build all platforms, and
+# publish from one job only after every build succeeds. Found pilot tags create
+# prereleases with the committed pilot notes.
 
 jobs:
   validate:
     name: Validate tag
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       - name: Validate tag is semver
-        # Tighten the `v*` trigger to strict vX.Y.Z before any build minutes burn: a
-        # typo'd hand-pushed tag would otherwise build all legs and land on the bare
-        # fallback release below. Pre-release suffixes (`v1.2.3-rc1`) need this relaxed.
-        run: |
-          ver="${GITHUB_REF_NAME#v}"
-          if [[ ! "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::tag '${GITHUB_REF_NAME}' is not vX.Y.Z"; exit 1
-          fi
+        run: python3 scripts/validate-release.py "$GITHUB_REF_NAME"
 
   build:
     name: Build ${{ matrix.asset_name }}
@@ -68,9 +58,8 @@ jobs:
             ext: .exe
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      - name: rust toolchain
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }} && rustup default stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --locked --release --target ${{ matrix.target }}
@@ -89,12 +78,11 @@ jobs:
 
   publish:
     name: Publish assets
-    needs: [build]
-    # Run even when a build leg fails so the binaries that DID ship still get
-    # attached with a matching sums file covering exactly what was published.
-    if: always()
+    # Publish only a complete, validated set of binaries.
+    needs: [validate, build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
@@ -103,8 +91,7 @@ jobs:
       - name: Generate + sign sha256sums.txt
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-        # Glob whatever was actually built so a partial release still produces a sums
-        # file matching exactly what shipped. Signing the sums file transitively
+        # Signing the sums file transitively
         # authenticates every asset hash it lists; gated on the secret so a fork /
         # pre-key release still ships a valid sha256-only release. update.rs verifies
         # this signature when (and only when) MINISIGN_PUBLIC_KEY is pinned.
@@ -125,14 +112,14 @@ jobs:
       - name: Upload assets to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        # The maintainer's release script normally creates the release (with the
-        # full notes) moments after the tag push; fall back to a bare release so a
-        # hand-pushed tag still gets its binaries. Never generate notes here -- the
-        # script owns them. --clobber keeps re-runs idempotent.
+        # One publisher creates the prerelease and uploads the complete set.
+        # --clobber keeps re-runs idempotent.
         run: |
           cd artifacts
+          prerelease=()
+          [[ "${GITHUB_REF_NAME}" == *-found.* ]] && prerelease+=(--prerelease)
           gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
-            || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --notes "" --verify-tag
+            || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --notes-file "${GITHUB_WORKSPACE}/docs/found-pilot-release.md" --verify-tag "${prerelease[@]}"
           files=(clauth-* sha256sums.txt)
           [ -f sha256sums.txt.minisig ] && files+=(sha256sums.txt.minisig)
           gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber --repo "${GITHUB_REPOSITORY}"

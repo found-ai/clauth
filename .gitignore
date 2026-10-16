@@ -1,3 +1,5 @@
 /target
-scripts
+/scripts/*
+!/scripts/validate-release.py
+!/scripts/test-found-release.py
 lcov.info

@@ -885,7 +885,7 @@ fn heal_detached_reinstalls_once_and_throttles() {
     );
     reset_heal_throttle_for_test();
 
-    heal_detached(true);
+    heal_detached_if_enabled(true);
     join_background_tasks();
     let log = std::fs::read_to_string(home.home().join("heal.log")).unwrap_or_default();
     assert_eq!(
@@ -895,7 +895,7 @@ fn heal_detached_reinstalls_once_and_throttles() {
     );
 
     // The floor is armed by the first attempt: a second spawns nothing.
-    heal_detached(true);
+    heal_detached_if_enabled(true);
     join_background_tasks();
     let log = std::fs::read_to_string(home.home().join("heal.log")).unwrap_or_default();
     assert_eq!(
@@ -942,7 +942,7 @@ fn heal_detached_respects_the_update_optout() {
     // claimed, the floor would refuse this second, un-gated call. It landing
     // proves the opted-out call never armed the floor.
     let _unset = crate::testutil::EnvPin::new(&home, &[("CLAUTH_NO_UPDATE", None)]);
-    heal_detached(true);
+    heal_detached_if_enabled(true);
     join_background_tasks();
     let log = std::fs::read_to_string(home.home().join("heal.log")).unwrap_or_default();
     assert_eq!(
@@ -989,7 +989,7 @@ fn heal_detached_respects_the_saved_update_toggle() {
     // The gate must run BEFORE the throttle claim: if the saved-off call had
     // claimed, the floor would refuse this second, un-gated call. It landing
     // proves the saved-off call never armed the floor.
-    heal_detached(true);
+    heal_detached_if_enabled(true);
     join_background_tasks();
     let log = std::fs::read_to_string(home.home().join("heal.log")).unwrap_or_default();
     assert_eq!(
@@ -999,9 +999,29 @@ fn heal_detached_respects_the_saved_update_toggle() {
     );
 }
 
-/// The fail-closed sentinel: `heal_detached` refuses to run when only
-/// `HERDR_BIN_PATH` is pinned, because a herdr pane injects that with the
-/// operator's real binary. The shim-state var is the sentinel a test fake sets.
+/// The Found build gate blocks the production caller even with user updates on.
+#[cfg(unix)]
+#[test]
+fn found_pilot_blocks_detached_plugin_updates() {
+    let home = crate::testutil::HomeSandbox::new();
+    let _env = crate::testutil::EnvPin::new(
+        &home,
+        &[
+            (
+                "HERDR_BIN_PATH",
+                Some(home.home().join("no-such-herdr").as_os_str()),
+            ),
+            ("HERDR_SHIM_STATE", None),
+            ("CLAUTH_NO_UPDATE", None),
+        ],
+    );
+    reset_heal_throttle_for_test();
+    heal_detached(true);
+    heal_detached(false);
+    assert!(!home.home().join("heal.log").exists());
+}
+
+/// The fail-closed sentinel protects the detached worker if enabled later.
 #[cfg(unix)]
 #[test]
 #[should_panic(expected = "stage a herdr shim beside a `HERDR_SHIM_STATE` pin")]
@@ -1020,7 +1040,7 @@ fn heal_detached_fails_closed_without_the_shim_sentinel() {
         ],
     );
 
-    heal_detached(true);
+    heal_detached_if_enabled(true);
 }
 
 /// `install`'s herdr shim: answers the plugin list with `$ANSWER` (a registry

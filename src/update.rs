@@ -9,7 +9,10 @@ use minisign_verify::{PublicKey, Signature};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
-const API_URL: &str = "https://api.github.com/repos/uwuclxdy/clauth/releases/latest";
+const API_URL: &str = "https://api.github.com/repos/found-ai/clauth/releases/latest";
+// Pilot releases are installed explicitly. Enable background updates only after
+// Found's release signing key and update channel are configured and verified.
+const SELF_UPDATES_ENABLED: bool = false;
 /// Env var: set to `1` to disable all background update work.
 const NO_UPDATE_ENV: &str = "CLAUTH_NO_UPDATE";
 
@@ -19,8 +22,9 @@ const NO_UPDATE_ENV: &str = "CLAUTH_NO_UPDATE";
 /// trusting any hash it lists; authenticating the sums file transitively
 /// authenticates every asset hash in it.
 ///
-/// A real key is pinned below, so fail-closed authenticity is ACTIVE in
-/// shipped builds: a missing/malformed/bad signature means no update. The
+/// The upstream key is retained in this dormant verifier. Found pilot builds
+/// disable self-updates above; a Found key must replace this one before that
+/// gate is enabled. A missing/malformed/bad signature means no update. The
 /// `trim().is_empty()` branch is retained as a compile-time escape hatch
 /// (it keeps the updater on SHA-256-only integrity during a rollout whose
 /// releases are not signed), and, being a compile-time constant, a pinned
@@ -55,11 +59,16 @@ struct Asset {
 /// The version this binary is, read off the manifest at build time.
 pub(crate) const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The one shared update gate: the persisted `[update].auto_update` setting
+/// The one shared update gate: Found's build-level pilot gate, the persisted
+/// `[update].auto_update` setting
 /// (default on — an absent table means on) AND `CLAUTH_NO_UPDATE` unset or
 /// not `"1"`. Both consumers — [`spawn`] and `herdr::heal_detached` — route
 /// through this so the env kill-switch and the saved toggle never disagree.
 pub(crate) fn updates_enabled(saved_auto_update: bool) -> bool {
+    SELF_UPDATES_ENABLED && update_preferences_allow(saved_auto_update)
+}
+
+fn update_preferences_allow(saved_auto_update: bool) -> bool {
     saved_auto_update && env::var(NO_UPDATE_ENV).as_deref() != Ok("1")
 }
 

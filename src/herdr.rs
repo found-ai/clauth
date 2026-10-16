@@ -775,6 +775,10 @@ static HEAL_THROTTLE: crate::plugin_host::HealThrottle = crate::plugin_host::Hea
 /// `saved_auto_update` is the persisted `[update]` table's `auto_update`,
 /// supplied by the caller from the config it just loaded.
 pub(crate) fn heal_detached(saved_auto_update: bool) {
+    heal_detached_if_enabled(crate::update::updates_enabled(saved_auto_update));
+}
+
+fn heal_detached_if_enabled(enabled: bool) {
     // The plugin is linux and macos only (its entrypoints are POSIX shell), so
     // there is nothing to heal on Windows.
     if cfg!(windows) {
@@ -784,7 +788,7 @@ pub(crate) fn heal_detached(saved_auto_update: bool) {
     // the same shared gate that governs clauth's own binary update gates it —
     // the saved toggle AND `CLAUTH_NO_UPDATE` — before the throttle claim so
     // a disabled box never even claims an attempt.
-    if !crate::update::updates_enabled(saved_auto_update) {
+    if !enabled {
         return;
     }
     let Some(claim) = HEAL_THROTTLE.claim(crate::usage::now_ms()) else {

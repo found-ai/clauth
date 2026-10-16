@@ -1,11 +1,11 @@
 [package]
 name = "clauth"
-version = "0.17.0"
+version = "0.17.0-found.1"
 edition = "2024"
 description = "Manage multiple Claude Code accounts, monitor 5h/7d usage with configurable auto-switch and delegation with an MCP plugin. CLI + TUI."
 license = "MIT"
-repository = "https://github.com/uwuclxdy/clauth"
-homepage = "https://github.com/uwuclxdy/clauth"
+repository = "https://github.com/found-ai/clauth"
+homepage = "https://github.com/found-ai/clauth"
 readme = "README.md"
 keywords = ["claude-code", "account-switcher", "usage-monitor", "mcp", "anthropic"]
 categories = ["command-line-utilities", "development-tools"]
