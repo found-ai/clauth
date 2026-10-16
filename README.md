@@ -1,3 +1,5 @@
+> **Found pilot fork.** Use the [Found pilot installation and validation guide](docs/found-pilot-release.md) for the pinned Found build. Automatic updates are disabled during the pilot. Upstream reference documentation follows below.
+
 <p align="center">
     <img src="media/clauth.png" alt="clauth: Claude Code account switcher and usage monitor TUI" width="480" />
 </p>

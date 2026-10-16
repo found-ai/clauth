@@ -1,28 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="uwuclxdy/clauth"
+REPO="found-ai/clauth"
+VERSION="v0.17.0-found.2"
 BINARY="clauth"
-NOCARGO=0
 
 for arg in "$@"; do
     case "${arg}" in
-        --nocargo) NOCARGO=1 ;;
+        # Kept for compatibility; Found's installer always uses its release.
+        --nocargo) ;;
         *) echo "Unknown argument: ${arg}" >&2; exit 1 ;;
     esac
 done
-
-# If cargo is available, prefer it (unless --nocargo was passed)
-if [[ "${NOCARGO}" -eq 0 ]] && command -v cargo &>/dev/null; then
-    echo "cargo detected, installing via cargo..."
-    cargo install clauth
-    echo ""
-    # Best-effort: converge plugin installPaths a dead session tree left behind.
-    clauth self-heal || echo "note: plugin path heal skipped" >&2
-    echo ""
-    echo "To uninstall, run: cargo uninstall clauth"
-    exit 0
-fi
 
 # Detect OS and arch
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -49,12 +38,12 @@ case "${OS}" in
         ;;
     *)
         echo "Unsupported OS: ${OS}" >&2
-        echo "Install via cargo: cargo install clauth"
+        echo "Install via cargo: cargo install --git https://github.com/${REPO} --tag ${VERSION} --locked clauth"
         exit 1
         ;;
 esac
 
-URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
+URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
 echo "Downloading ${ASSET}..."
 
 TMP=$(mktemp)
@@ -71,7 +60,7 @@ else
 fi
 
 # Verify integrity against sha256sums.txt from the same release
-SUMS_URL="https://github.com/${REPO}/releases/latest/download/sha256sums.txt"
+SUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/sha256sums.txt"
 echo "Verifying checksum..."
 
 if command -v curl &>/dev/null; then
@@ -111,7 +100,9 @@ echo "Checksum verified."
 chmod +x "${TMP}"
 
 # Choose install directory
-if [[ "${OS}" == "windows" ]]; then
+if [[ -n "${CLAUTH_INSTALL_DIR:-}" ]]; then
+    INSTALL_DIR="${CLAUTH_INSTALL_DIR}"
+elif [[ "${OS}" == "windows" ]]; then
     INSTALL_DIR="${HOME}/.local/bin"
 elif [[ -w /usr/local/bin ]]; then
     INSTALL_DIR="/usr/local/bin"

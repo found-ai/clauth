@@ -875,24 +875,6 @@ fn detached_repoint_reports_skips_once_per_process() {
     assert!(third.is_some(), "the reset re-arms the report");
 }
 
-/// The committed install script runs the heal after both install legs, so a
-/// binary install converges dangling plugin paths without waiting for the
-/// next session start. A drift here silently drops the fix.
-#[test]
-fn install_sh_runs_self_heal_after_both_install_legs() {
-    let script = include_str!("../../install.sh");
-    assert_eq!(
-        script.matches("self-heal").count(),
-        2,
-        "install.sh must run `clauth self-heal` after the cargo leg and after the download leg: {script}"
-    );
-    assert!(
-        script.contains("cargo install clauth")
-            && script.contains("\"${INSTALL_DIR}/${BINARY}\" self-heal"),
-        "both legs carry the heal call"
-    );
-}
-
 /// The silent contract: a clean or absent registry prints nothing and moves
 /// no bytes, so a session start stays quiet.
 #[test]

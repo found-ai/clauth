@@ -969,6 +969,10 @@ fn a_poll_that_times_out_counts_as_not_yet_and_the_recovery_proceeds() {
                     Err(e) => panic!("stub accept: {e}"),
                 }
             };
+            // macOS inherits the listener's nonblocking mode. Restore blocking
+            // reads, as the shared HTTP stub does, before waiting for headers.
+            sock.set_nonblocking(false)
+                .expect("blocking accepted socket");
             sock.set_read_timeout(Some(Duration::from_secs(5))).ok();
             let mut req = Vec::new();
             let mut tmp = [0u8; 1024];

@@ -1,14 +1,14 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "clauth",
-  "version": "0.17.0",
+  "version": "0.17.0-found.2",
   "description": "Expose clauth profiles to the session: list/usage, switch, delegate.",
   "author": {
     "name": "uwuclxdy"
   },
   "license": "MIT",
-  "homepage": "https://github.com/uwuclxdy/clauth",
-  "repository": "https://github.com/uwuclxdy/clauth",
+  "homepage": "https://github.com/found-ai/clauth",
+  "repository": "https://github.com/found-ai/clauth",
   "keywords": ["claude-code", "oauth", "profiles", "mcp", "account-switch"],
   "mcpServers": {
     "clauth": {
