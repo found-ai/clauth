@@ -3782,6 +3782,9 @@ pub(crate) fn write_profile_credentials(
     _held: &StateLockHeld,
 ) -> Result<()> {
     let cred_path = profile_credentials_path(name)?;
+    if credentials.is_none() {
+        crate::credential_sync::forget(name)?;
+    }
     match credentials {
         Some(creds) => {
             let bytes = serialize_credentials_preserving_extra(creds, &cred_path)?;

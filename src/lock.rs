@@ -371,6 +371,74 @@ pub(crate) fn set_subprocess_budget_override(budget: Option<Duration>) {
 #[derive(Debug)]
 pub(crate) struct StateLockHeld(());
 
+// Every state writer participates in this outer lock. A credential repair can
+// release the state flock before invoking security(1), without allowing a switch
+// or sign-out to slip between its ownership check and write. Reentrant on the
+// owning thread; the rank is outside State and inside Config.
+static INSTALL_THREAD_LOCK: Mutex<Option<File>> = Mutex::new(None);
+thread_local! {
+    static INSTALL_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+pub(crate) struct InstallationLock {
+    _thread: Option<std::sync::MutexGuard<'static, Option<File>>>,
+    _rank: Option<crate::lockorder::RankGuard>,
+}
+
+impl InstallationLock {
+    pub(crate) fn acquire() -> Result<Self> {
+        Self::acquire_with_timeout(flock_wait_deadline())
+    }
+
+    fn acquire_with_timeout(timeout: Duration) -> Result<Self> {
+        if INSTALL_DEPTH.get() > 0 {
+            INSTALL_DEPTH.set(INSTALL_DEPTH.get() + 1);
+            return Ok(Self {
+                _thread: None,
+                _rank: None,
+            });
+        }
+        let deadline = Instant::now() + timeout;
+        let mut guard = loop {
+            match INSTALL_THREAD_LOCK.try_lock() {
+                Ok(g) => break g,
+                Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    anyhow::ensure!(
+                        Instant::now() < deadline,
+                        "credential installation lock timed out"
+                    );
+                    std::thread::sleep(
+                        LOCK_POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+                    );
+                }
+            }
+        };
+        let dir = clauth_dir()?;
+        crate::profile::mkdir_700(&dir)?;
+        let file = crate::profile::open_state_file(&dir.join(".installation.lock"))?;
+        lock_file_with_timeout(&file, deadline.saturating_duration_since(Instant::now()))?;
+        let rank = crate::lockorder::RankGuard::enter::<crate::lockorder::rank::Installation>();
+        *guard = Some(file);
+        INSTALL_DEPTH.set(1);
+        Ok(Self {
+            _thread: Some(guard),
+            _rank: Some(rank),
+        })
+    }
+}
+
+impl Drop for InstallationLock {
+    fn drop(&mut self) {
+        INSTALL_DEPTH.set(INSTALL_DEPTH.get().saturating_sub(1));
+        if INSTALL_DEPTH.get() == 0
+            && let Some(g) = self._thread.as_mut()
+        {
+            **g = None;
+        }
+    }
+}
+
 #[must_use]
 pub(crate) struct StateLock {
     // Non-None only for the outermost acquisition on this thread.
@@ -384,6 +452,7 @@ pub(crate) struct StateLock {
     // inside a `SharedSubprocessBudget` scope (that guard owns the budget) and
     // for reentrant frames; only a holder that armed disarms on drop.
     _armed_budget: bool,
+    _installation: Option<InstallationLock>,
 }
 
 impl StateLock {
@@ -414,6 +483,7 @@ impl StateLock {
                 _thread_guard: None,
                 _rank: None,
                 _armed_budget: false,
+                _installation: None,
             });
         }
 
@@ -426,6 +496,10 @@ impl StateLock {
              (`lock::with_keychain_budget`): its wait spends the window the scope's \
              `security` calls share, so take the flock before the scope opens"
         );
+
+        let started = Instant::now();
+        let installation = InstallationLock::acquire_with_timeout(timeout)?;
+        let timeout = timeout.saturating_sub(started.elapsed());
 
         // Outermost acquisition: block until we own the thread mutex.
         // `THREAD_LOCK` is `static`, so `.lock()` yields `MutexGuard<'static, _>`
@@ -475,6 +549,7 @@ impl StateLock {
             _thread_guard: Some(guard),
             _rank: Some(rank),
             _armed_budget: armed_budget,
+            _installation: Some(installation),
         })
     }
 }

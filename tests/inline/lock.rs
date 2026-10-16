@@ -533,11 +533,11 @@ fn every_keychain_budget_arm_under_src_is_a_known_site() {
             ),
             (
                 "with_keychain_budget(",
-                known(&[("oauth.rs", 1), ("runtime.rs", 1)]),
+                known(&[("credential_sync.rs", 2), ("runtime.rs", 1)]),
             ),
         ]),
         "a Keychain budget armed outside its known sites: a per-session item leg arms \
-         only inside `owned_keychain_leg`, a landing only through `with_keychain_budget`; \
+         only inside `owned_keychain_leg`, credential synchronization only through `with_keychain_budget`; \
          the census, GC sweep and daemon tick arm above their holds by design, and no \
          other site arms"
     );

@@ -613,7 +613,7 @@ pub(crate) fn has_live_session(name: &ProfileName) -> bool {
 /// `CLAUDE_CONFIG_DIR=<runtime>`, and CC namespaces its Keychain item per config
 /// dir (`Claude Code-credentials-<sha256(dir)[0:8]>`)
 /// while a rotation's only Keychain write is the UNSUFFIXED
-/// `Claude Code-credentials` mirror (`keychain.rs::keychain_mirror_rotation`); the
+/// `Claude Code-credentials` publication (`credential_sync`); the
 /// namespaced items are written by the session-start seed and the swap
 /// executor, never by a rotation.
 /// So a rotation leaves that CC holding the old refresh token; its own
@@ -2307,12 +2307,11 @@ pub(crate) const ROTATION_LOCK_TIMEOUT: Duration = crate::oauth::TOKEN_HTTP_DEAD
 
 /// What a macOS landing's Keychain mirror is budgeted for under the rotation
 /// lock: two `security` invocations at `keychain::SECURITY_TIMEOUT` each. A
-/// landing that mirrors makes up to FOUR: the foreign gate's item read
-/// (`keychain::item_login_state`), then the mirror's merge read, write and
-/// read-back verify. Every landing (`oauth::land_pair`, the rotation persist
-/// included) arms one [`crate::lock::SharedSubprocessBudget`] of this size, or
-/// adopts the daemon tick's window, once its state-flock hold ends, so the four
-/// share it and each later call is clamped to what the earlier ones left.
+/// landing that publishes makes up to FIVE: the synchronization read, the
+/// merge's ownership recheck, write, transport read-back, and acknowledgement
+/// read-back. The reconciler gives all adapter calls together this elapsed
+/// budget, adopting a wider armed budget when present. State-flock waits are
+/// outside each adapter scope, and later calls receive only the time left.
 /// `SessionSwap::swap_to` arms one more over its item write or sign-out, and
 /// `SessionSwap::converge_in_place`, which lands nothing, arms one over its
 /// sign-out (three calls at most), each past the carry's store write and the

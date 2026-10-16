@@ -188,6 +188,9 @@ pub(crate) mod rank {
         /// asserts.
         ProfileTtl = 450;
         /// `with_state_lock` (cross-process state flock). Inner of `config`.
+        /// Serializes credential publication with state mutations across processes.
+        /// Unlike State, may span a bounded Keychain operation.
+        Installation = 450;
         State = 500;
         /// `hook_note::ScopeLock` (the per-scope record flock). A true leaf —
         /// nothing is acquired while it is held — ranked INSIDE `State`, which is

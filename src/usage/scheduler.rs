@@ -3713,6 +3713,9 @@ fn tick(state: &SchedulerState) {
     // the store or spends from memory: ahead of the re-stamp and fetch legs.
     catch_up_staged_pairs(&state.config);
 
+    // A fresh saved token must not hide a failed live credential publication.
+    crate::credential_sync::tick();
+
     // CLA-ROLL: rolling-sidecar freshness scan — renew a rolling-token profile's
     // session bearer hours ahead of its clock death instead of relying on
     // rotation side effects (lease-holder only, like every other leg).

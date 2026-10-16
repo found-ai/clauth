@@ -9,6 +9,7 @@ mod codex_daemon;
 mod codex_login;
 mod codex_profiles;
 mod completions;
+mod credential_sync;
 mod daemon;
 mod fallback;
 mod format;

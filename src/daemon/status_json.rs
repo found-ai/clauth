@@ -659,6 +659,10 @@ pub(crate) fn build_codex_entries(
 /// each `Option` field emits a present key holding `null` when absent.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub(crate) struct StatusBody {
+    /// Publication health is independent of token freshness in the profile store.
+    /// Omitted until a managed installation establishes ownership.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) credential_sync: Option<crate::credential_sync::SyncStatus>,
     pub(crate) schema: u64,
     pub(crate) generated_at: String,
     #[schema(required = true)]
@@ -721,6 +725,7 @@ pub(crate) fn build_status(
     let now = now_ms();
 
     StatusBody {
+        credential_sync: crate::credential_sync::status(),
         schema: SCHEMA_VERSION,
         generated_at: iso_from_ms(now),
         active_profile: config.state.active_profile.as_deref().map(str::to_string),

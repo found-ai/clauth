@@ -389,6 +389,7 @@ pub(crate) fn stamp_rolling_token(
         // Saved first into the install source (`credentials.json` before the
         // first roll), the keep below carries it onto the new bearer.
         sync_live_extra_into_install_source(name);
+        crate::credential_sync::remember_current(name)?;
         preserve_static_mint(name)?;
         let bytes = keep_non_login_in_sidecar(&bytes, &path);
         atomic_write_600(&path, bytes).context("write rolling session-token.json")
@@ -1109,8 +1110,10 @@ pub(crate) fn follow_live_file_login(
         Ok(live) => live,
         Err(e) => return Ok(LiveSlotFollow::Unreadable(e)),
     };
-    let recognized =
-        live_login_is_empty(&live) || live.access_token().is_some_and(|t| candidates.contains(&t));
+    let recognized = live_login_is_empty(&live)
+        || live.access_token().is_some_and(|t| {
+            candidates.contains(&t) || crate::credential_sync::file_owner(t).is_some()
+        });
     if !recognized {
         return Ok(LiveSlotFollow::NotOurs);
     }
@@ -1213,6 +1216,11 @@ pub(crate) fn live_login_is_stored(active: &ProfileName) -> bool {
     };
     if live.access_token().filter(|t| !t.is_empty()).is_none() {
         return false;
+    }
+    if live.access_token().is_some_and(|t| {
+        crate::credential_sync::recognizes(active, crate::credential_sync::Destination::File, t)
+    }) {
+        return true;
     }
     ["credentials.json", "session-token.json"]
         .into_iter()
@@ -2769,7 +2777,17 @@ pub(crate) fn link_profile_credentials(name: &ProfileName) -> Result<()> {
                         .filter(|t| !t.is_empty())
                 };
                 let logins_match = match (login_of(&link), login_of(&target)) {
-                    (Some(live), Some(stored)) => live == stored,
+                    (Some(live), Some(stored)) => {
+                        live == stored
+                            || (crate::credential_sync::recognizes(
+                                name,
+                                crate::credential_sync::Destination::File,
+                                &live,
+                            ) && read_json_file::<ClaudeCredentials>(&target)
+                                .ok()
+                                .and_then(|c| c.access_token_expires_at())
+                                .is_some_and(|expiry| expiry > crate::usage::now_ms() as i64))
+                    }
                     _ => false,
                 };
                 if !logins_match && std::fs::read(&link).ok() != std::fs::read(&target).ok() {
@@ -2792,6 +2810,8 @@ pub(crate) fn link_profile_credentials(name: &ProfileName) -> Result<()> {
             carry_live_extra_best_effort(&link, &target, name, preserve);
         }
 
+        crate::credential_sync::begin_install(name)?;
+
         // macOS: make the switch real, since Claude Code reads the Keychain.
         // `Leave` because this is the GUARDED relink: it is also what a rename,
         // a first-ever capture, and the daemon's and TUI's boot reconcile call,
@@ -2813,6 +2833,9 @@ pub(crate) fn link_profile_credentials(name: &ProfileName) -> Result<()> {
 
 pub(crate) fn clear_claude_credentials() -> Result<()> {
     with_state_lock(|_held| {
+        if let Some(name) = crate::profile::active_profile_name() {
+            crate::credential_sync::forget(&name)?;
+        }
         let link = claude_credentials_path()?;
         if link.symlink_metadata().is_ok() {
             std::fs::remove_file(&link).context("failed to remove .credentials.json")?;
@@ -3429,6 +3452,7 @@ pub(crate) fn force_link_profile_credentials(name: &ProfileName) -> Result<()> {
     with_state_lock(|_held| {
         let link = claude_credentials_path()?;
         let target = install_source_path(name)?;
+        crate::credential_sync::begin_install(name)?;
         // One load for both layers, as in `link_profile_credentials`.
         let preserve = preserve_non_login_keys();
         if link.symlink_metadata().is_ok() {
