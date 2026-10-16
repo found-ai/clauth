@@ -31692,6 +31692,9 @@ fn dashboard_walk_scans_every_frame_for_whole_cards_and_intact_header() {
     for &(w, h) in &[(45u16, 24u16), (80u16, 14u16), (80u16, 24u16)] {
         for &key in &[KeyCode::Down, KeyCode::PageDown] {
             let mut app = dash_app();
+            // Compare layout at a fixed animation phase: the logo's normal
+            // blink must not look like header corruption on a slower runner.
+            app.anim_phase_ms = Some(300);
             let header: Vec<String> = dash_rows(&app, w, h)[..3].to_vec();
             let body_bottom = h as usize - 1;
             for step in 0..7 {

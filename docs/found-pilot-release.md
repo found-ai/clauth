@@ -17,6 +17,11 @@ of real account switches, at least two natural token rotations, and a daemon
 restart. Automated tests include injected publication failures and a real
 throwaway macOS Keychain test; those do not replace observation of real sessions.
 
+The initial Mac pilot completed both observed token refreshes, account switching,
+and daemon restart on October 16, 2026. See the
+[validation record and next Mac checklist](found-pilot-validation.md) before
+expanding adoption.
+
 Download the binary matching your platform and `sha256sums.txt` from
 [this exact Found release](https://github.com/found-ai/clauth/releases/tag/v0.17.0-found.2).
 Verify the binary's SHA-256 against the corresponding entry before installation.
@@ -62,3 +67,6 @@ a profile.
 Rollback replaces the binary and restarts all clauth processes. Keep the newest
 profile credentials and session-token files. Do not restore an old credential
 backup: it may contain a refresh token that has already been consumed.
+Ensure the restored binary is executable (`chmod +x /path/to/clauth`) before
+restarting the daemon; a private backup copy may have been saved without its
+executable bit.
