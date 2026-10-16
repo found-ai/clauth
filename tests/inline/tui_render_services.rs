@@ -1022,6 +1022,7 @@ fn detail_line_truncates_paths_and_prose_to_the_pane() {
 /// itself is pinned by equality in `tests/inline/tui_app.rs`.
 #[test]
 fn an_outdated_plugin_version_reads_in_the_warning_tone() {
+    let _tier = crate::testutil::TierSandbox::new(super::theme::Tier::Full);
     let value_styles = |text: &str| {
         super::detail_line(text, 7, 80)
             .spans

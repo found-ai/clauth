@@ -38,6 +38,8 @@ this is not a claim that every team environment has been validated.
 The post-merge CI run exposed a separate macOS render-test timing failure: the
 logo blinked between two header comparisons. The layout test now pins its
 existing test-only animation clock. The released production binary is unchanged.
+The local parallel suite also exposed a color assertion without the shared
+palette guard; that assertion now holds the existing `TierSandbox` guard.
 
 ## Next Mac acceptance
 
