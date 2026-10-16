@@ -369,3 +369,19 @@ fn is_newer_compares_versions_as_numbers() {
         );
     }
 }
+
+#[test]
+fn prerelease_versions_have_semver_precedence() {
+    for (tag, current, expected) in [
+        ("v0.17.0-found.1", "0.9.0", true),
+        ("v0.17.0-found.2", "0.17.0-found.1", true),
+        ("v0.17.0-found.10", "0.17.0-found.2", true),
+        ("v0.17.0-found.1", "0.17.0-found.1", false),
+        ("v0.17.0", "0.17.0-found.1", true),
+        ("v0.17.0-found.1", "0.17.0", false),
+        ("0.17.0+new", "0.17.0+old", false),
+        ("0.17.0-found.01", "0.17.0-found.1", false),
+    ] {
+        assert_eq!(is_newer(tag, current), expected, "{tag} versus {current}");
+    }
+}

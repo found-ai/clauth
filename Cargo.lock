@@ -379,6 +379,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "self-replace",
+ "semver",
  "serde",
  "serde_json",
  "sha1",

@@ -211,14 +211,11 @@ fn tick_heals_a_broken_plugin_registration() {
     );
 }
 
-/// The tick's herdr leg is the herdr-heal call site twin: one tick over a
-/// stale registry reaches the fake herdr install when the saved `[update]`
-/// toggle is on, and — after the tick's own reload picks a freshly persisted
-/// `auto_update = false` up — spawns nothing, leaving the throttle floor
-/// unclaimed (the re-enabled tick after it still installs).
+/// The Found pilot must not reinstall a remote plugin from the daemon tick,
+/// including after reload observes a saved update preference of on.
 #[cfg(unix)]
 #[test]
-fn tick_herdr_heal_follows_the_saved_update_toggle() {
+fn tick_herdr_heal_is_disabled_in_found_pilot() {
     use std::ffi::OsStr;
 
     use crate::testutil::join_background_tasks;
@@ -264,19 +261,16 @@ fn tick_herdr_heal_follows_the_saved_update_toggle() {
         "a tick after a reload with the saved toggle off reinstalls nothing"
     );
 
-    // The saved-off tick must not have claimed the throttle: back on (again
-    // through the tick's reload), the very next tick installs.
+    // Reloading a saved on must not override the build-level pilot gate.
     let mut state = crate::profile::load_app_state().expect("load state");
     state.update.auto_update = true;
     save_app_state(&state).expect("persist on toggle");
 
     daemon.tick();
     join_background_tasks();
-    let log = std::fs::read_to_string(home.home().join("heal.log")).unwrap_or_default();
-    assert_eq!(
-        log.trim(),
-        "plugin install uwuclxdy/clauth/herdr-plugin --ref v0.15.1 --yes",
-        "a tick with the saved toggle on reaches the fake install"
+    assert!(
+        !home.home().join("heal.log").exists(),
+        "the pilot refuses remote reinstalls even with the saved toggle on"
     );
 }
 

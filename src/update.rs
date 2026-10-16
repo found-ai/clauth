@@ -321,19 +321,12 @@ fn asset_name() -> Option<&'static str> {
     }
 }
 
-fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
-    let v = v.trim_start_matches('v');
-    let mut it = v.splitn(3, '.');
-    Some((
-        it.next()?.parse().ok()?,
-        it.next()?.parse().ok()?,
-        it.next()?.parse().ok()?,
-    ))
-}
-
 pub(crate) fn is_newer(tag: &str, current: &str) -> bool {
-    match (parse_version(tag), parse_version(current)) {
-        (Some(latest), Some(cur)) => latest > cur,
+    match (
+        semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag)),
+        semver::Version::parse(current.strip_prefix('v').unwrap_or(current)),
+    ) {
+        (Ok(latest), Ok(cur)) => latest.cmp_precedence(&cur).is_gt(),
         _ => false,
     }
 }
